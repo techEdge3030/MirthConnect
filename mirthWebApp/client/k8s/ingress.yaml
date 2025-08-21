@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mirth-web
+  namespace: pre-production
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/ip-address-type: ipv4
+    alb.ingress.kubernetes.io/group.name: saga-site-dev-alb
+    alb.ingress.kubernetes.io/certificate-arn: 'arn:aws:acm:us-east-2:853450806095:certificate/359db7fe-71fb-49c5-8fce-e094a58847c9'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/inbound-cidrs: 12.8.238.3/32, 76.108.211.199/32, 67.166.39.159/32, 104.223.98.116/32
+    alb.ingress.kubernetes.io/group.order: '5'
+    alb.ingress.kubernetes.io/actions.mirth-web: >
+      {"type":"forward","forwardConfig":{"targetGroups":[{"serviceName":"mirth-web","servicePort":3000,"weight":100}],"targetGroupStickinessConfig":{"enabled":true,"durationSeconds":200}}}
+    # alb.ingress.kubernetes.io/conditions.mirth-web: >
+    #   [{"field":"http-header","httpHeaderConfig":{"httpHeaderName": "X-LETMEIN", "values":["KamziVn2oLb"]}}]
+spec:
+  ingressClassName: alb
+  tls:
+    - hosts:
+        - preprod.saga-dev2.com
+  rules:
+    - host: preprod.saga-dev2.com
+      http:
+        paths:
+          - path: /mirth-web
+            pathType: Prefix
+            backend:
+              service:
+                name: mirth-web
+                port:
+                  name: use-annotation

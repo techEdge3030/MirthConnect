@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextgen-connect-db
+  namespace: default
+  labels:
+    app: nextgen-connect-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextgen-connect-db
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: nextgen-connect-db
+    spec:
+      volumes:
+        - name: nextgen-connect-db-claim
+          persistentVolumeClaim:
+            claimName: nextgen-connect-db-claim
+      containers:
+        - resources: {}
+          name: nextgen-connect-db
+          env:
+            - name: POSTGRES_DB
+              value: mirthdb
+            - name: POSTGRES_PASSWORD
+              value: Nf3AynfXwpT*gD46
+            - name: POSTGRES_USER
+              value: mirth
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: nextgen-connect-db-claim
+              mountPath: /var/lib/postgresql
+              subPath: postgres
+          image: postgres:latest
+          args:
+            - '-p'
+            - '5432'
+      restartPolicy: Always
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler

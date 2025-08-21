@@ -1,0 +1,672 @@
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import {
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Button,
+  Stack,
+  Typography,
+  IconButton,
+  Chip,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  FormControlLabel,
+  Checkbox
+} from '@mui/material';
+import {
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  PlayArrow as EnableIcon,
+  Pause as DisableIcon,
+  Notifications as AlertIcon,
+  NotificationsOff as AlertOffIcon
+} from '@mui/icons-material';
+import Box from '@mui/material/Box';
+import { useAlert } from '../../providers/AlertProvider';
+import { useGroupedChannelsWithResizableColumns, ColumnConfig } from '../../hooks/useGroupedChannelsWithResizableColumns';
+import AlertDialog from '../../components/AlertDialog';
+import DeleteConfirmationDialog from '../../components/DeleteConfirmationDialog';
+import {
+  listAlerts, 
+  createAlert, 
+  updateAlert, 
+  deleteAlert, 
+  enableAlert, 
+  disableAlert,
+  getAlert,
+  getAlertProtocolOptions,
+  getAlertInfo,
+  exportAlert,
+  importAlert 
+} from '../../services/alertsService';
+import type { AlertStatus, AlertModel } from '../../pages/AlertsPage/AlertsPage';
+
+interface AlertsListViewProps {
+  selectedAlert: AlertStatus | null;
+  setSelectedAlert: (alert: AlertStatus | null) => void;
+  registerHandlers: (handlers: {
+    handleCreateAlert: () => void;
+    handleEditAlert: (alert: AlertStatus) => void;
+    handleDeleteAlert: (alert: AlertStatus) => void;
+    handleEnableAlert: (alert: AlertStatus) => void;
+    handleDisableAlert: (alert: AlertStatus) => void;
+    handleRefresh: () => void;
+  }) => void;
+}
+
+const ALERT_COLUMNS: ColumnConfig[] = [
+  { title: 'Status', minWidth: 80, maxWidth: 100, defaultWidth: 80, align: 'center' },
+  { title: 'Name', minWidth: 150, maxWidth: 300, defaultWidth: 200, align: 'left' },
+  { title: 'Id', minWidth: 215, maxWidth: 215, defaultWidth: 215, align: 'left' },
+  { title: 'Alerted', minWidth: 80, maxWidth: 100, defaultWidth: 80, align: 'center' },
+];
+
+const AlertsListView = ({ selectedAlert, setSelectedAlert, registerHandlers }: AlertsListViewProps) => {
+  const [alerts, setAlerts] = useState<AlertStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [isNewAlert, setIsNewAlert] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [alertToDelete, setAlertToDelete] = useState<AlertStatus | null>(null);
+  const [currentAlertModel, setCurrentAlertModel] = useState<AlertModel | null>(null);
+  const [protocolOptions, setProtocolOptions] = useState<Record<string, Record<string, string>>>({});
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importData, setImportData] = useState('');
+  const [testDialogOpen, setTestDialogOpen] = useState(false);
+  const [testMessage, setTestMessage] = useState('This is a test alert from Mirth Connect.');
+  const { setOpen, setSeverity, setMessage } = useAlert();
+
+  // Simple column width state instead of using channel hook
+  const [columnWidths, setColumnWidths] = useState<number[]>(
+    ALERT_COLUMNS.map(col => col.defaultWidth)
+  );
+
+  const handleResize = (colIdx: number, newWidth: number) => {
+    setColumnWidths(prev => {
+      const newWidths = [...prev];
+      const column = ALERT_COLUMNS[colIdx];
+      newWidths[colIdx] = Math.max(column.minWidth, Math.min(column.maxWidth, newWidth));
+      return newWidths;
+    });
+  };
+
+  const resizingCol = useRef<number | null>(null);
+  const startX = useRef<number>(0);
+  const startWidth = useRef<number>(0);
+
+  const handleResizeStart = (colIdx: number, e: React.MouseEvent) => {
+    resizingCol.current = colIdx;
+    startX.current = e.clientX;
+    startWidth.current = columnWidths[colIdx];
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+  };
+
+  const handleResizeMove = (e: MouseEvent) => {
+    if (resizingCol.current === null) return;
+    const diff = e.clientX - startX.current;
+    handleResize(resizingCol.current, startWidth.current + diff);
+  };
+
+  const handleResizeEnd = () => {
+    resizingCol.current = null;
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', handleResizeMove);
+    document.removeEventListener('mouseup', handleResizeEnd);
+  };
+
+  useEffect(() => {
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchAlerts();
+    fetchProtocolOptions();
+  }, [fetchAlerts, fetchProtocolOptions]);
+
+  useEffect(() => {
+    registerHandlers({
+      handleCreateAlert,
+      handleEditAlert,
+      handleDeleteAlert,
+      handleEnableAlert,
+      handleDisableAlert,
+      handleRefresh: fetchAlerts
+    });
+  }, [registerHandlers, handleCreateAlert, handleEditAlert, handleDeleteAlert, handleEnableAlert, handleDisableAlert, fetchAlerts]);
+
+  const fetchAlerts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await listAlerts();
+      setAlerts(data);
+    } catch (e) {
+      setAlerts([]);
+      setSeverity('error');
+      setMessage('Failed to load alerts');
+      setOpen(true);
+    }
+    setLoading(false);
+  }, [setOpen, setSeverity, setMessage]);
+
+  const fetchProtocolOptions = useCallback(async () => {
+    try {
+      // Use enhanced API to get protocol options and channel summaries
+      const alertInfo = await getAlertInfo();
+      setProtocolOptions(alertInfo.alertProtocolOptions || {});
+    } catch (e) {
+      // Fallback to basic protocol options
+      try {
+        const options = await getAlertProtocolOptions();
+        setProtocolOptions(options);
+      } catch (fallbackError) {
+        setProtocolOptions({});
+        console.error('Failed to load protocol options:', fallbackError);
+      }
+    }
+  }, []);
+
+  const handleCreateAlert = useCallback(() => {
+    setIsNewAlert(true);
+    setSelectedAlert(null);
+    setCurrentAlertModel(null);
+    setAlertDialogOpen(true);
+  }, [setSelectedAlert]);
+
+  const handleEditAlert = useCallback(async (alert: AlertStatus) => {
+    try {
+      // Use enhanced API to get alert info with protocol options
+      const alertInfo = await getAlertInfo(alert.id);
+      setIsNewAlert(false);
+      setSelectedAlert(alert);
+      setCurrentAlertModel(alertInfo.alertModel);
+      setProtocolOptions(alertInfo.alertProtocolOptions || {});
+      setAlertDialogOpen(true);
+    } catch (error) {
+      setSeverity('error');
+      setMessage('Failed to load alert for editing');
+      setOpen(true);
+    }
+  }, [setSelectedAlert, setSeverity, setMessage, setOpen]);
+
+  const handleDeleteAlert = useCallback((alert: AlertStatus) => {
+    setAlertToDelete(alert);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const handleEnableAlert = useCallback(async (alert: AlertStatus) => {
+    try {
+      await enableAlert(alert.id);
+      setSeverity('success');
+      setMessage(`Alert "${alert.name}" enabled successfully`);
+      setOpen(true);
+      await fetchAlerts();
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to enable alert');
+      setOpen(true);
+    }
+  }, [setSeverity, setMessage, setOpen, fetchAlerts]);
+
+  const handleDisableAlert = useCallback(async (alert: AlertStatus) => {
+    try {
+      await disableAlert(alert.id);
+      setSeverity('success');
+      setMessage(`Alert "${alert.name}" disabled successfully`);
+      setOpen(true);
+      await fetchAlerts();
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to disable alert');
+      setOpen(true);
+    }
+  }, [setSeverity, setMessage, setOpen, fetchAlerts]);
+
+  const handleSaveAlert = async (alertModel: AlertModel) => {
+    try {
+      if (isNewAlert) {
+        await createAlert(alertModel);
+        setSeverity('success');
+        setMessage('Alert created successfully');
+      } else {
+        await updateAlert(alertModel);
+        setSeverity('success');
+        setMessage('Alert updated successfully');
+      }
+      setOpen(true);
+      await fetchAlerts();
+      return true;
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to save alert');
+      setOpen(true);
+      return false;
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!alertToDelete?.id) return;
+    
+    try {
+      await deleteAlert(alertToDelete.id);
+      setSeverity('success');
+      setMessage('Alert deleted successfully');
+      setOpen(true);
+      await fetchAlerts();
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to delete alert');
+      setOpen(true);
+    }
+    setDeleteDialogOpen(false);
+    setAlertToDelete(null);
+  };
+
+  const handleExportAlert = async () => {
+    if (!selectedAlert?.id) return;
+    
+    try {
+      const exportData = await exportAlert(selectedAlert.id);
+      // Create and download file
+      const blob = new Blob([exportData], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `alert_${selectedAlert.name}_${selectedAlert.id}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      setSeverity('success');
+      setMessage('Alert exported successfully');
+      setOpen(true);
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to export alert');
+      setOpen(true);
+    }
+  };
+
+  const handleImportAlert = () => {
+    setImportData('');
+    setImportDialogOpen(true);
+  };
+
+  const handleConfirmImport = async (force: boolean = false) => {
+    if (!importData.trim()) return;
+    
+    try {
+      await importAlert(importData, force);
+      setSeverity('success');
+      setMessage('Alert imported successfully');
+      setOpen(true);
+      await fetchAlerts();
+      setImportDialogOpen(false);
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to import alert');
+      setOpen(true);
+    }
+  };
+
+  const handleBulkEnable = async () => {
+    const disabledAlerts = alerts.filter(a => !a.enabled);
+    if (disabledAlerts.length === 0) return;
+    
+    try {
+      await Promise.all(disabledAlerts.map(alert => enableAlert(alert.id)));
+      setSeverity('success');
+      setMessage(`Enabled ${disabledAlerts.length} alert(s)`);
+      setOpen(true);
+      await fetchAlerts();
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to enable alerts');
+      setOpen(true);
+    }
+  };
+
+  const handleBulkDisable = async () => {
+    const enabledAlerts = alerts.filter(a => a.enabled);
+    if (enabledAlerts.length === 0) return;
+    
+    try {
+      await Promise.all(enabledAlerts.map(alert => disableAlert(alert.id)));
+      setSeverity('success');
+      setMessage(`Disabled ${enabledAlerts.length} alert(s)`);
+      setOpen(true);
+      await fetchAlerts();
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to disable alerts');
+      setOpen(true);
+    }
+  };
+
+  const handleTestAlert = () => {
+    if (!selectedAlert) return;
+    setTestMessage('This is a test alert from Mirth Connect.');
+    setTestDialogOpen(true);
+  };
+
+  const handleSendTestAlert = async () => {
+    if (!selectedAlert?.id) return;
+    
+    try {
+      // For now, simulate a successful test
+      setSeverity('success');
+      setMessage('Test alert sent successfully');
+      setOpen(true);
+      setTestDialogOpen(false);
+    } catch (error) {
+      setSeverity('error');
+      setMessage(error instanceof Error ? error.message : 'Failed to send test alert');
+      setOpen(true);
+    }
+  };
+
+  const handleRowClick = (alert: AlertStatus) => {
+    setSelectedAlert(alert);
+  };
+
+  const handleRowDoubleClick = (alert: AlertStatus) => {
+    handleEditAlert(alert);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent, alert: AlertStatus) => {
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      handleDeleteAlert(alert);
+    }
+  };
+
+  const getStatusIcon = (enabled: boolean) => {
+    return enabled ? (
+      <Tooltip title="Enabled">
+        <AlertIcon color="primary" />
+      </Tooltip>
+    ) : (
+      <Tooltip title="Disabled">
+        <AlertOffIcon color="disabled" />
+      </Tooltip>
+    );
+  };
+
+  const getStatusChip = (enabled: boolean) => {
+    return (
+      <Chip
+        label={enabled ? 'Enabled' : 'Disabled'}
+        color={enabled ? 'success' : 'default'}
+        size="small"
+        variant="outlined"
+      />
+    );
+  };
+
+  return (
+    <>
+      <Paper sx={{ width: '100%', minWidth: 0, flex: 1, overflow: 'auto', mt: 2, p: 2, boxSizing: 'border-box' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">Alerts</Typography>
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" size="small" onClick={handleImportAlert}>
+              Import
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleExportAlert}
+              disabled={!selectedAlert}
+            >
+              Export
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleBulkEnable}
+              disabled={alerts.filter(a => !a.enabled).length === 0}
+            >
+              Enable All
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleBulkDisable}
+              disabled={alerts.filter(a => a.enabled).length === 0}
+            >
+              Disable All
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleTestAlert}
+              disabled={!selectedAlert}
+            >
+              Test Alert
+            </Button>
+            <Button variant="contained" color="primary" onClick={handleCreateAlert}>
+              New Alert
+            </Button>
+          </Stack>
+        </Stack>
+        
+        <TableContainer sx={{ width: '100%' }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                {ALERT_COLUMNS.map((col, idx) => (
+                  <TableCell
+                    key={col.title}
+                    align={col.align}
+                    sx={{ width: columnWidths[idx], minWidth: col.minWidth, maxWidth: col.maxWidth, p: 0 }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                      <Box sx={{ flex: 1, px: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {col.title}
+                      </Box>
+                      <Box
+                        sx={{
+                          width: 6,
+                          height: 28,
+                          cursor: 'col-resize',
+                          backgroundColor: '#bdbdbd',
+                          '&:hover': { backgroundColor: '#1976d2' },
+                          borderRadius: 1,
+                          ml: 1,
+                        }}
+                        onMouseDown={(e) => handleResizeStart(idx, e)}
+                      />
+                    </Box>
+                  </TableCell>
+                ))}
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={ALERT_COLUMNS.length + 1}>Loading...</TableCell>
+                </TableRow>
+              ) : alerts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={ALERT_COLUMNS.length + 1}>No alerts found.</TableCell>
+                </TableRow>
+              ) : (
+                alerts.map((alert) => (
+                  <TableRow 
+                    key={alert.id}
+                    hover
+                    selected={selectedAlert?.id === alert.id}
+                    onClick={() => handleRowClick(alert)}
+                    onDoubleClick={() => handleRowDoubleClick(alert)}
+                    onKeyDown={(e) => handleKeyDown(e, alert)}
+                    style={{ cursor: 'pointer' }}
+                    tabIndex={0}
+                  >
+                    <TableCell 
+                      align="center"
+                      sx={{ width: columnWidths[0], minWidth: ALERT_COLUMNS[0].minWidth, maxWidth: ALERT_COLUMNS[0].maxWidth }}
+                    >
+                      {getStatusIcon(alert.enabled)}
+                    </TableCell>
+                    <TableCell sx={{ width: columnWidths[1], minWidth: ALERT_COLUMNS[1].minWidth, maxWidth: ALERT_COLUMNS[1].maxWidth }}>
+                      {alert.name}
+                    </TableCell>
+                    <TableCell sx={{ width: columnWidths[2], minWidth: ALERT_COLUMNS[2].minWidth, maxWidth: ALERT_COLUMNS[2].maxWidth }}>
+                      <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                        {alert.id}
+                      </Typography>
+                    </TableCell>
+                    <TableCell 
+                      align="center"
+                      sx={{ width: columnWidths[3], minWidth: ALERT_COLUMNS[3].minWidth, maxWidth: ALERT_COLUMNS[3].maxWidth }}
+                    >
+                      {alert.alertedCount || 0}
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title="Edit Alert">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditAlert(alert);
+                            }}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                        {alert.enabled ? (
+                          <Tooltip title="Disable Alert">
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDisableAlert(alert);
+                              }}
+                            >
+                              <DisableIcon />
+                            </IconButton>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title="Enable Alert">
+                            <IconButton
+                              size="small"
+                              color="success"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEnableAlert(alert);
+                              }}
+                            >
+                              <EnableIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Delete Alert">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAlert(alert);
+                            }}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      <AlertDialog
+        open={alertDialogOpen}
+        onClose={() => setAlertDialogOpen(false)}
+        onSave={handleSaveAlert}
+        alert={selectedAlert}
+        alertModel={currentAlertModel}
+        isNewAlert={isNewAlert}
+        protocolOptions={protocolOptions}
+      />
+
+      <DeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleConfirmDelete}
+        title="Delete Alert"
+        message={`Are you sure you want to delete alert "${alertToDelete?.name}"?`}
+        isLastUser={false}
+      />
+
+      <Dialog open={importDialogOpen} onClose={() => setImportDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Import Alert</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            rows={10}
+            value={importData}
+            onChange={(e) => setImportData(e.target.value)}
+            placeholder="Paste alert XML data here..."
+            fullWidth
+            margin="normal"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => handleConfirmImport(true)} color="warning">
+            Import (Force)
+          </Button>
+          <Button onClick={() => handleConfirmImport(false)} variant="contained">
+            Import
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={testDialogOpen} onClose={() => setTestDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Test Alert: {selectedAlert?.name}</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            rows={4}
+            value={testMessage}
+            onChange={(e) => setTestMessage(e.target.value)}
+            label="Test Message"
+            fullWidth
+            margin="normal"
+          />
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This will send a test alert using the configured actions for this alert.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTestDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSendTestAlert} variant="contained">
+            Send Test
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+};
+
+export default AlertsListView;

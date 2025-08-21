@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextgen-connect-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  rules:
+    - host: nextgen-connect.saga-it.com  # Replace with your desired host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nextgen-connect
+                port:
+                  number: 8443
+  tls:
+    - hosts:
+        - nextgen-connect.saga-it.com  # Replace with your desired host
+      secretName: nextgen-tls-secret  # Replace with your desired TLS secret name

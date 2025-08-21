@@ -1,0 +1,22 @@
+﻿{
+    "list":  {
+                 "channelGroup":  {
+                                      "@version":  "4.5.2",
+                                      "id":  "7f547a38-1d70-44aa-bb7b-2ab354076fca",
+                                      "name":  "Group",
+                                      "revision":  2,
+                                      "lastModified":  {
+                                                           "time":  1751216816781,
+                                                           "timezone":  "America/Los_Angeles"
+                                                       },
+                                      "description":  "This is demo group of channels for development purposes.",
+                                      "channels":  {
+                                                       "channel":  {
+                                                                       "@version":  "4.5.2",
+                                                                       "id":  "aff94094-ecea-4272-828c-86cd7a3cbd3e",
+                                                                       "revision":  0
+                                                                   }
+                                                   }
+                                  }
+             }
+}

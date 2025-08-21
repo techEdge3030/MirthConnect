@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirth-web
+  namespace: pre-production
+  labels:
+    app: mirth-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mirth-web
+  template:
+    metadata:
+      labels:
+        app: mirth-web
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: mirth-web
+          matchLabelKeys:
+            - pod-template-hash
+      containers:
+        - name: mirth-web
+          image: 853450806095.dkr.ecr.us-east-2.amazonaws.com/saga-it/mirth-admin-web:latest-dev
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8443
+            initialDelaySeconds: 6
+            periodSeconds: 4
+            timeoutSeconds: 3
+            failureThreshold: 1

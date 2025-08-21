@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextgen-connect
+  namespace: default
+  labels:
+    app: nextgen-connect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextgen-connect
+  template:
+    metadata:
+      name: nextgen-connect
+      creationTimestamp: null
+      labels:
+        app: nextgen-connect
+    spec:
+      containers:
+        - resources: {}
+          name: nextgen-connect
+          env:
+            - name: DATABASE
+              value: postgres
+            - name: DATABASE_MAX_CONNECTIONS
+              value: '20'
+            - name: DATABASE_PASSWORD
+              value: Nf3AynfXwpT*gD46
+            - name: DATABASE_URL
+              value: 'jdbc:postgresql://nextgen-connect-db:5432/mirthdb'
+            - name: DATABASE_USERNAME
+              value: mirth
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8443
+          imagePullPolicy: IfNotPresent
+          image: docker.io/nextgenhealthcare/connect
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler

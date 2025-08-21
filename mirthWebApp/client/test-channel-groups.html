@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channel Groups API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 3px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+    <h1>Channel Groups API Test</h1>
+    
+    <div class="test-section">
+        <h2>Configuration</h2>
+        <label>Mirth Server URL: <input type="text" id="serverUrl" value="http://localhost:8080" style="width: 300px;"></label><br><br>
+        <label>Username: <input type="text" id="username" value="admin"></label><br><br>
+        <label>Password: <input type="password" id="password" value="admin"></label><br><br>
+        <button onclick="testConnection()">Test Connection</button>
+    </div>
+
+    <div class="test-section">
+        <h2>API Tests</h2>
+        <button onclick="testGetChannels()">Get All Channels</button>
+        <button onclick="testGetChannelGroups()">Get All Channel Groups</button>
+        <button onclick="testGetChannelGroupsPost()">Get Channel Groups (POST)</button>
+        <button onclick="testCombined()">Test Combined Logic</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        let sessionId = null;
+
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${message}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+
+        async function login() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${serverUrl}/api/users/_login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const cookies = document.cookie;
+                    const sessionMatch = cookies.match(/JSESSIONID=([^;]+)/);
+                    if (sessionMatch) {
+                        sessionId = sessionMatch[1];
+                        log('Login successful', 'success');
+                        return true;
+                    }
+                }
+                throw new Error(`Login failed: ${response.status}`);
+            } catch (error) {
+                log(`Login error: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function makeRequest(endpoint, options = {}) {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            const defaultOptions = {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'OpenAPI'
+                },
+                credentials: 'include'
+            };
+
+            if (sessionId) {
+                defaultOptions.headers['Cookie'] = `JSESSIONID=${sessionId}`;
+            }
+
+            const finalOptions = { ...defaultOptions, ...options };
+            
+            try {
+                const response = await fetch(`${serverUrl}${endpoint}`, finalOptions);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        async function testConnection() {
+            log('Testing connection...');
+            const success = await login();
+            if (success) {
+                log('Connection test completed successfully', 'success');
+            }
+        }
+
+        async function testGetChannels() {
+            try {
+                log('Fetching all channels...');
+                const data = await makeRequest('/api/channels');
+                log(`Channels response: ${JSON.stringify(data, null, 2)}`, 'success');
+            } catch (error) {
+                log(`Error fetching channels: ${error.message}`, 'error');
+            }
+        }
+
+        async function testGetChannelGroups() {
+            try {
+                log('Fetching all channel groups...');
+                const data = await makeRequest('/api/channelgroups');
+                log(`Channel groups response: ${JSON.stringify(data, null, 2)}`, 'success');
+            } catch (error) {
+                log(`Error fetching channel groups: ${error.message}`, 'error');
+            }
+        }
+
+        async function testGetChannelGroupsPost() {
+            try {
+                log('Fetching channel groups via POST...');
+                const data = await makeRequest('/api/channelgroups/_getChannelGroups', {
+                    method: 'POST',
+                    body: JSON.stringify({ channelGroupIds: [] })
+                });
+                log(`Channel groups POST response: ${JSON.stringify(data, null, 2)}`, 'success');
+            } catch (error) {
+                log(`Error fetching channel groups via POST: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCombined() {
+            try {
+                log('Testing combined channel groups logic...');
+                
+                // Get channels and groups in parallel
+                const [channelsData, groupsData] = await Promise.all([
+                    makeRequest('/api/channels'),
+                    makeRequest('/api/channelgroups')
+                ]);
+
+                log('Channels data received', 'success');
+                log('Channel groups data received', 'success');
+
+                // Extract channels
+                const channels = channelsData.list?.channel || [];
+                const channelList = Array.isArray(channels) ? channels : [channels];
+                
+                // Extract groups
+                const groups = groupsData.list?.channelGroup || [];
+                const groupList = Array.isArray(groups) ? groups : [groups];
+
+                log(`Found ${channelList.length} channels and ${groupList.length} groups`, 'success');
+
+                // Create channel to group mapping
+                const channelToGroupMap = new Map();
+                groupList.forEach(group => {
+                    if (group.channels) {
+                        const channelIds = Array.isArray(group.channels) ? group.channels : [group.channels];
+                        channelIds.forEach(channelId => {
+                            channelToGroupMap.set(channelId, group.name);
+                        });
+                    }
+                });
+
+                // Assign groups to channels
+                const channelsWithGroups = channelList.map(channel => ({
+                    id: channel.id,
+                    name: channel.name,
+                    groupName: channelToGroupMap.get(channel.id) || '[Default Group]'
+                }));
+
+                // Group channels by group name
+                const groupedChannels = new Map();
+                channelsWithGroups.forEach(channel => {
+                    const groupName = channel.groupName;
+                    if (!groupedChannels.has(groupName)) {
+                        groupedChannels.set(groupName, []);
+                    }
+                    groupedChannels.get(groupName).push(channel);
+                });
+
+                log('Channel grouping completed successfully', 'success');
+                log(`Grouped channels: ${JSON.stringify(Array.from(groupedChannels.entries()), null, 2)}`, 'success');
+
+            } catch (error) {
+                log(`Error in combined test: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html> 
